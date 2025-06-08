@@ -32,8 +32,8 @@ local function request_outgoingCalls(item, current_depth, parent_node, client_id
 		return
 	end
 
-	local params = { item = item }
-	client:request('callHierarchy/outgoingCalls', params, function(err, result, ctx)
+	---@type lsp.Handler
+	local function handler_outgoingCalls(err, result, ctx)
 		local current_node = nil
 
 		if current_depth > 1 then
@@ -78,7 +78,10 @@ local function request_outgoingCalls(item, current_depth, parent_node, client_id
 		if M.pending_items == 0 then
 			M.display_custom_ui()
 		end
-	end)
+	end
+
+	local params = { item = item }
+	client:request('callHierarchy/outgoingCalls', params, handler_outgoingCalls)
 end
 
 ---@param client_id integer
@@ -88,8 +91,6 @@ local function request_incomingCalls(item, current_depth, parent_node, client_id
 		vim.notify("Could not get the client from context", vim.log.levels.ERROR)
 		return
 	end
-
-	local params = { item = item }
 
 	---@type lsp.Handler
 	local handler_incomingCalls = function(err, result, ctx)
@@ -142,6 +143,7 @@ local function request_incomingCalls(item, current_depth, parent_node, client_id
 		end
 	end
 
+	local params = { item = item }
 	client:request('callHierarchy/incomingCalls', params, handler_incomingCalls)
 end
 
@@ -490,8 +492,8 @@ function M.find_recursive_calls(depth, direction)
 		return
 	end
 
-	local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
-	client:request('textDocument/prepareCallHierarchy', params, function(err, result, ctx)
+	---@type lsp.Handler
+	local handler_prepareCallHierarchy = function(err, result, ctx)
 		if err or not result or vim.tbl_isempty(result) then
 			vim.notify("Could not prepare call hierarchy", vim.log.levels.ERROR)
 			return
@@ -521,7 +523,10 @@ function M.find_recursive_calls(depth, direction)
 				vim.notify("Invalid direction specified. Use 'incoming' or 'outcoming'.", vim.log.levels.ERROR)
 			end
 		end, 0)
-	end)
+	end
+
+	local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
+	client:request('textDocument/prepareCallHierarchy', params, handler_prepareCallHierarchy)
 end
 
 function M.setup(opts)
