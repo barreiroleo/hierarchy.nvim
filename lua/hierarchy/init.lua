@@ -20,35 +20,15 @@ function M.safe_call(fn, ...)
 	return result
 end
 
-function M.process_item_calls(item, current_depth, parent_node, client_id)
-	-- Stop if we've exceeded the maximum depth
-	if current_depth > M.depth then
-		M.pending_items = M.pending_items - 1
-		if M.pending_items == 0 then
-			M.display_custom_ui()
-		end
-		return
-	end
-
-	if not parent_node or type(parent_node) ~= "table" or not parent_node.references then
-		vim.notify("Error: Invalid parent_node in process_item_calls", vim.log.levels.ERROR)
-		M.pending_items = M.pending_items - 1
-		if M.pending_items == 0 then
-			M.display_custom_ui()
-		end
-		return
-	end
-
-	local params = {
-		item = item
-	}
-
+---@param client_id integer
+local function request_outgoingCalls(item, current_depth, parent_node, client_id)
 	local client = vim.lsp.get_clients({ id = client_id })[1]
 	if not client then
 		vim.notify("Could not get the client from context", vim.log.levels.ERROR)
 		return
 	end
 
+	local params = { item = item }
 	client:request('callHierarchy/outgoingCalls', params, function(err, result, ctx)
 		local current_node = nil
 
@@ -95,6 +75,28 @@ function M.process_item_calls(item, current_depth, parent_node, client_id)
 			M.display_custom_ui()
 		end
 	end)
+end
+
+function M.process_item_calls(item, current_depth, parent_node, client_id)
+	-- Stop if we've exceeded the maximum depth
+	if current_depth > M.depth then
+		M.pending_items = M.pending_items - 1
+		if M.pending_items == 0 then
+			M.display_custom_ui()
+		end
+		return
+	end
+
+	if not parent_node or type(parent_node) ~= "table" or not parent_node.references then
+		vim.notify("Error: Invalid parent_node in process_item_calls", vim.log.levels.ERROR)
+		M.pending_items = M.pending_items - 1
+		if M.pending_items == 0 then
+			M.display_custom_ui()
+		end
+		return
+	end
+
+	request_outgoingCalls(item, current_depth, parent_node, client_id)
 end
 
 function M.build_reference_lines(node, lines, indent, expanded_nodes)
