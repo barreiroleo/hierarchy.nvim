@@ -1,3 +1,7 @@
+---@alias hierarchy.Direction
+---| "outcoming"
+---| "incoming"
+
 local M = {}
 
 M.reference_tree = {}
@@ -64,7 +68,7 @@ local function request_outgoingCalls(item, current_depth, parent_node, client_id
 
 				M.pending_items = M.pending_items + 1
 				vim.defer_fn(function()
-					M.process_item_calls(target, current_depth + 1, next_parent, ctx.client_id)
+					M.process_outcoming_item_calls(target, current_depth + 1, next_parent, ctx.client_id)
 				end, 0)
 			end
 		end
@@ -75,6 +79,70 @@ local function request_outgoingCalls(item, current_depth, parent_node, client_id
 			M.display_custom_ui()
 		end
 	end)
+end
+
+---@param client_id integer
+local function request_incomingCalls(item, current_depth, parent_node, client_id)
+	local client = vim.lsp.get_clients({ id = client_id })[1]
+	if not client then
+		vim.notify("Could not get the client from context", vim.log.levels.ERROR)
+		return
+	end
+
+	local params = { item = item }
+
+	---@type lsp.Handler
+	local handler_incomingCalls = function(err, result, ctx)
+		---@cast result lsp.CallHierarchyIncomingCall[]
+		-- vim.print({"err: ", err}) vim.print({"result: ", result})
+
+		local current_node = nil
+
+		if current_depth > 1 then
+			local is_exact_self_ref = (
+				item.name == parent_node.name and
+				item.uri == parent_node.uri and
+				item.selectionRange.start.line == parent_node.selectionRange.start.line
+			)
+
+			if not is_exact_self_ref then
+				current_node = parent_node.references[item.name]
+				if not current_node then
+					current_node = {
+						name = item.name,
+						uri = item.uri,
+						range = item.range,
+						selectionRange = item.selectionRange,
+						references = {},
+						display = item.name .. " [" .. vim.fn.fnamemodify(item.uri, ":t") .. ":" ..
+							(item.selectionRange.start.line + 1) .. "]"
+					}
+					parent_node.references[item.name] = current_node
+				end
+			end
+		end
+
+		if not err and result and not vim.tbl_isempty(result) then
+			for _, call in ipairs(result) do
+				local target = call.from
+
+				local next_parent = current_node or parent_node
+
+				M.pending_items = M.pending_items + 1
+				vim.defer_fn(function()
+					M.process_incoming_item_calls(target, current_depth + 1, next_parent, ctx.client_id)
+				end, 0)
+			end
+		end
+
+		M.pending_items = M.pending_items - 1
+
+		if M.pending_items == 0 then
+			M.display_custom_ui()
+		end
+	end
+
+	client:request('callHierarchy/incomingCalls', params, handler_incomingCalls)
 end
 
 function M.process_item_calls(item, current_depth, parent_node, client_id)
@@ -95,8 +163,16 @@ function M.process_item_calls(item, current_depth, parent_node, client_id)
 		end
 		return
 	end
+end
 
+function M.process_outcoming_item_calls(item, current_depth, parent_node, client_id)
+	M.process_item_calls(item, current_depth, parent_node, client_id)
 	request_outgoingCalls(item, current_depth, parent_node, client_id)
+end
+
+function M.process_incoming_item_calls(item, current_depth, parent_node, client_id)
+	M.process_item_calls(item, current_depth, parent_node, client_id)
+	request_incomingCalls(item, current_depth, parent_node, client_id)
 end
 
 function M.build_reference_lines(node, lines, indent, expanded_nodes)
@@ -395,7 +471,8 @@ function M.goto_function_definition()
 	end
 end
 
-function M.find_recursive_calls(depth)
+---@param direction hierarchy.Direction
+function M.find_recursive_calls(depth, direction)
 	M.reference_tree = {
 		name = "",
 		uri = "",
@@ -436,7 +513,13 @@ function M.find_recursive_calls(depth)
 
 		M.pending_items = 1
 		vim.defer_fn(function()
-			M.process_item_calls(item, 1, M.reference_tree, ctx.client_id)
+			if direction == "outcoming" then
+				M.process_outcoming_item_calls(item, 1, M.reference_tree, ctx.client_id)
+			elseif direction == "incoming" then
+				M.process_incoming_item_calls(item, 1, M.reference_tree, ctx.client_id)
+			else
+				vim.notify("Invalid direction specified. Use 'incoming' or 'outcoming'.", vim.log.levels.ERROR)
+			end
 		end, 0)
 	end)
 end
@@ -449,15 +532,17 @@ function M.setup(opts)
 
 	vim.api.nvim_create_user_command("FunctionReferences", function(cmd_opts)
 		local depth = M.depth
+		local direction = "outcoming"
 		if cmd_opts.args and cmd_opts.args ~= "" then
 			local args = vim.split(cmd_opts.args, " ")
-			depth = tonumber(args[1]) or M.depth
+			direction = args[1] and args[1]:lower()
+			depth = tonumber(args[2]) or M.depth
 		end
 
-		M.find_recursive_calls(depth)
+		M.find_recursive_calls(depth, direction)
 	end, {
 		nargs = "?",
-		desc = "Find function references recursively. Usage: FunctionReferences [depth]"
+		desc = "Find function references recursively. Usage: FunctionReferences [depth] [incoming|outcoming]"
 	})
 end
 
