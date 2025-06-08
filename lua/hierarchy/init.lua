@@ -20,7 +20,7 @@ function M.safe_call(fn, ...)
 	return result
 end
 
-function M.process_item_calls(item, current_depth, parent_node)
+function M.process_item_calls(item, current_depth, parent_node, client_id)
 	-- Stop if we've exceeded the maximum depth
 	if current_depth > M.depth then
 		M.pending_items = M.pending_items - 1
@@ -43,7 +43,13 @@ function M.process_item_calls(item, current_depth, parent_node)
 		item = item
 	}
 
-	vim.lsp.buf_request(0, 'callHierarchy/outgoingCalls', params, function(err, result)
+	local client = vim.lsp.get_clients({ id = client_id })[1]
+	if not client then
+		vim.notify("Could not get the client from context", vim.log.levels.ERROR)
+		return
+	end
+
+	client:request('callHierarchy/outgoingCalls', params, function(err, result, ctx)
 		local current_node = nil
 
 		if current_depth > 1 then
@@ -78,7 +84,7 @@ function M.process_item_calls(item, current_depth, parent_node)
 
 				M.pending_items = M.pending_items + 1
 				vim.defer_fn(function()
-					M.process_item_calls(target, current_depth + 1, next_parent)
+					M.process_item_calls(target, current_depth + 1, next_parent, ctx.client_id)
 				end, 0)
 			end
 		end
@@ -399,9 +405,14 @@ function M.find_recursive_calls(depth)
 	M.pending_items = 0
 	M.depth = depth or 3
 
-	local params = vim.lsp.util.make_position_params()
+	local client = vim.lsp.get_clients({ method = "textDocuement/prepareCallHierarchy" })[1]
+	if not client then
+		vim.notify("No LSP client found for call hierarchy", vim.log.levels.ERROR)
+		return
+	end
 
-	vim.lsp.buf_request(0, 'textDocument/prepareCallHierarchy', params, function(err, result)
+	local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
+	client:request('textDocument/prepareCallHierarchy', params, function(err, result, ctx)
 		if err or not result or vim.tbl_isempty(result) then
 			vim.notify("Could not prepare call hierarchy", vim.log.levels.ERROR)
 			return
@@ -423,7 +434,7 @@ function M.find_recursive_calls(depth)
 
 		M.pending_items = 1
 		vim.defer_fn(function()
-			M.process_item_calls(item, 1, M.reference_tree)
+			M.process_item_calls(item, 1, M.reference_tree, ctx.client_id)
 		end, 0)
 	end)
 end
@@ -439,12 +450,6 @@ function M.setup(opts)
 		if cmd_opts.args and cmd_opts.args ~= "" then
 			local args = vim.split(cmd_opts.args, " ")
 			depth = tonumber(args[1]) or M.depth
-		end
-
-		local clients = vim.lsp.get_active_clients({ bufnr = 0 })
-		if vim.tbl_isempty(clients) then
-			vim.notify("No LSP clients attached to this buffer", vim.log.levels.ERROR)
-			return
 		end
 
 		M.find_recursive_calls(depth)
