@@ -24,6 +24,35 @@ function M.safe_call(fn, ...)
 	return result
 end
 
+---@param item table
+---@param parent_node table
+local function create_reference_node(item, parent_node)
+	--- Check if the item is an exact self-reference
+	if item.name == parent_node.name and
+		item.uri == parent_node.uri and
+		item.selectionRange.start.line == parent_node.selectionRange.start.line
+	then
+		return nil
+	end
+
+	-- Return existing node if it exists
+	local current_node = parent_node.references[item.name]
+	if current_node then return current_node end
+
+	current_node = {
+		name = item.name,
+		uri = item.uri,
+		range = item.range,
+		selectionRange = item.selectionRange,
+		references = {},
+		display = item.name .. " [" .. vim.fn.fnamemodify(item.uri, ":t") .. ":" ..
+			(item.selectionRange.start.line + 1) .. "]"
+	}
+	parent_node.references[item.name] = current_node
+
+	return current_node
+end
+
 ---@param client_id integer
 local function request_outgoingCalls(item, current_depth, parent_node, client_id)
 	local client = vim.lsp.get_clients({ id = client_id })[1]
@@ -34,36 +63,16 @@ local function request_outgoingCalls(item, current_depth, parent_node, client_id
 
 	---@type lsp.Handler
 	local function handler_outgoingCalls(err, result, ctx)
+		---@cast result lsp.CallHierarchyOutgoingCall[]
+
 		local current_node = nil
-
 		if current_depth > 1 then
-			local is_exact_self_ref = (
-				item.name == parent_node.name and
-				item.uri == parent_node.uri and
-				item.selectionRange.start.line == parent_node.selectionRange.start.line
-			)
-
-			if not is_exact_self_ref then
-				current_node = parent_node.references[item.name]
-				if not current_node then
-					current_node = {
-						name = item.name,
-						uri = item.uri,
-						range = item.range,
-						selectionRange = item.selectionRange,
-						references = {},
-						display = item.name .. " [" .. vim.fn.fnamemodify(item.uri, ":t") .. ":" ..
-							(item.selectionRange.start.line + 1) .. "]"
-					}
-					parent_node.references[item.name] = current_node
-				end
-			end
+			current_node = create_reference_node(item, parent_node)
 		end
 
 		if not err and result and not vim.tbl_isempty(result) then
 			for _, call in ipairs(result) do
 				local target = call.to
-
 				local next_parent = current_node or parent_node
 
 				M.pending_items = M.pending_items + 1
@@ -95,38 +104,15 @@ local function request_incomingCalls(item, current_depth, parent_node, client_id
 	---@type lsp.Handler
 	local handler_incomingCalls = function(err, result, ctx)
 		---@cast result lsp.CallHierarchyIncomingCall[]
-		-- vim.print({"err: ", err}) vim.print({"result: ", result})
 
 		local current_node = nil
-
 		if current_depth > 1 then
-			local is_exact_self_ref = (
-				item.name == parent_node.name and
-				item.uri == parent_node.uri and
-				item.selectionRange.start.line == parent_node.selectionRange.start.line
-			)
-
-			if not is_exact_self_ref then
-				current_node = parent_node.references[item.name]
-				if not current_node then
-					current_node = {
-						name = item.name,
-						uri = item.uri,
-						range = item.range,
-						selectionRange = item.selectionRange,
-						references = {},
-						display = item.name .. " [" .. vim.fn.fnamemodify(item.uri, ":t") .. ":" ..
-							(item.selectionRange.start.line + 1) .. "]"
-					}
-					parent_node.references[item.name] = current_node
-				end
-			end
+			current_node = create_reference_node(item, parent_node)
 		end
 
 		if not err and result and not vim.tbl_isempty(result) then
 			for _, call in ipairs(result) do
 				local target = call.from
-
 				local next_parent = current_node or parent_node
 
 				M.pending_items = M.pending_items + 1
