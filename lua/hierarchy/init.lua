@@ -533,7 +533,7 @@ function M.setup(opts)
 		M.find_recursive_calls(depth, direction)
 	end, {
 		nargs = "?",
-		desc = "Find function references recursively. Usage: FunctionReferences [depth] [incoming|outcoming]"
+		desc = "Find function references recursively. Usage: FunctionReferences [incoming|outcoming] [depth]"
 	})
 end
 
